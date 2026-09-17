@@ -93,7 +93,7 @@ def get_main_keyboard() -> InlineKeyboardMarkup:
 
 def get_start_text() -> str:
     return (
-        f"<b>!!!Добро пожаловать в <u>MessageSaver</u> Bot!</b>\n\n"
+        f"<b>Добро пожаловать в <u>MessageSaver</u> Bot!</b>\n\n"
         f"С <b>MessageSaver</b> вы мгновенно увидите все ключевые события:\n\n"
         
         f"{EMOJI_EDIT} <b>Редактирование сообщений:</b>\n"
