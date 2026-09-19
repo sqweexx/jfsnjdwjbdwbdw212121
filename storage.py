@@ -28,6 +28,7 @@ _settings_loaded = False
 DEFAULT_SETTINGS: dict[str, bool] = {
     "deleted": True,
     "edited": True,
+    "view_once": True,
     "text": True,
     "photo": True,
     "video": True,
