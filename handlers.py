@@ -1,4 +1,6 @@
 import logging
+from io import BytesIO
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CopyTextButton, InputMediaPhoto
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
@@ -8,6 +10,17 @@ from utils import extract_message_data, get_sender_display
 from config import OWNER_ID
 
 logger = logging.getLogger(__name__)
+
+# Медиа, которое можно сохранить по ответу (одноразовые фото/видео/кружки и т.п.)
+VIEW_ONCE_MEDIA_TYPES = frozenset({
+    "photo",
+    "video",
+    "video_note",
+    "voice",
+    "audio",
+    "document",
+    "animation",
+})
 
 # ===== НАСТРОЙКИ =====
 # Стикер приветствия
@@ -105,6 +118,7 @@ def get_start_text() -> str:
         
         f"{EMOJI_CAMERA} <b>Медиафайлы:</b>\n"
         f"— Сохраняю фото, видео, голосовые, документы и стикеры\n"
+        f"— Одноразовые (1 просмотр): ответь на сообщение <b>не открывая</b> — пришлю копию\n"
         f"— Присылаю их вам вместе с информацией об отправителе\n\n"
         
         f"{EMOJI_LOCK} <b>Приватность:</b>\n"
@@ -150,6 +164,7 @@ def _settings_keyboard(user_id: int) -> InlineKeyboardMarkup:
     keyboard = [
         [InlineKeyboardButton(f"{mark('deleted')} Удалённые сообщения", callback_data="set_deleted")],
         [InlineKeyboardButton(f"{mark('edited')} Изменённые сообщения", callback_data="set_edited")],
+        [InlineKeyboardButton(f"{mark('view_once')} Одноразовые медиа", callback_data="set_view_once")],
         [
             InlineKeyboardButton(f"{mark('text')} Текст", callback_data="set_text"),
             InlineKeyboardButton(f"{mark('photo')} Фото", callback_data="set_photo"),
@@ -177,7 +192,8 @@ def _settings_text() -> str:
         f"{EMOJI_GEAR} <b>Общие настройки</b>\n\n"
         "<b>Типы уведомлений:</b>\n"
         "• Удалённые — копии удалённых сообщений\n"
-        "• Изменённые — уведомления о правках\n\n"
+        "• Изменённые — уведомления о правках\n"
+        "• Одноразовые — копия по ответу на медиа «1 просмотр»\n\n"
         "<b>Форматы</b> (только для удалённых):\n"
         "какие типы медиа присылать при удалении.\n\n"
         f"{EMOJI_CHECK} — включено {EMOJI_CROSS} — выключено\n"
@@ -231,7 +247,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "2. Выбираешь чаты, которые нужно отслеживать\n"
             "3. Бот автоматически сохраняет все сообщения в память\n"
             "4. При удалении или изменении — сразу присылает тебе копию\n\n"
-            "Всё работает в фоне, ничего дополнительно нажимать не нужно."
+            f"{EMOJI_CAMERA} <b>Одноразовые фото / видео / кружки:</b>\n"
+            "Ответь на сообщение <b>не открывая</b> его — бот скачает медиа "
+            "и пришлёт постоянную копию сюда, в чат с ботом.\n\n"
+            "Удаления и правки работают в фоне сами."
         )
     elif data == "info_delete":
         text = (
@@ -362,6 +381,166 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     storage.store(message.business_connection_id or "", message.chat.id, message.message_id, data)
     storage.cleanup_old(max_size=4000)
 
+    # Ответ владельца на медиа (в т.ч. «1 просмотр») → постоянная копия в личку
+    await maybe_save_view_once_on_reply(context, message, notify_user)
+
+
+async def maybe_save_view_once_on_reply(
+    context: ContextTypes.DEFAULT_TYPE,
+    message,
+    notify_user: int | None,
+) -> None:
+    """Если владелец ответил на чужое медиа, не открывая его — сохранить и прислать копию."""
+    if not notify_user or not message.from_user:
+        return
+    if message.from_user.id != notify_user:
+        return
+    if not storage.is_enabled(notify_user, "view_once"):
+        return
+
+    replied = message.reply_to_message
+    if not replied:
+        return
+
+    # Не сохраняем свои же медиа
+    if replied.from_user and replied.from_user.id == notify_user:
+        return
+
+    data = extract_message_data(replied)
+    content_type = data.get("content_type")
+    if content_type not in VIEW_ONCE_MEDIA_TYPES or not data.get("file_id"):
+        # Запасной вариант: взять из RAM, если в reply_to_message медиа уже пустое
+        conn_id = message.business_connection_id or ""
+        stored = storage.get(conn_id, replied.chat.id, replied.message_id)
+        if not stored:
+            return
+        content_type = stored.get("content_type")
+        if content_type not in VIEW_ONCE_MEDIA_TYPES or not stored.get("file_id"):
+            return
+        data = stored
+
+    data["notify_user_id"] = notify_user
+    sender = data.get("sender_name") or get_sender_display(replied)
+    header = f"{EMOJI_CAMERA} <b>Сохранено медиа от {sender}</b>\n<code>одноразовое / по ответу</code>"
+    await send_media_copy(context, data, header, reupload=True)
+
+
+async def _media_payload(bot, file_id: str, file_name: str | None, *, reupload: bool):
+    """Скачать файл для постоянной копии или вернуть file_id как fallback."""
+    if not reupload:
+        return file_id
+    try:
+        tg_file = await bot.get_file(file_id)
+        buf = BytesIO()
+        await tg_file.download_to_memory(out=buf)
+        buf.seek(0)
+        name = file_name
+        if not name and tg_file.file_path:
+            name = tg_file.file_path.rsplit("/", 1)[-1]
+        if name:
+            buf.name = name
+        return buf
+    except Exception as e:
+        logger.error("Не удалось скачать медиа: %s", type(e).__name__)
+        return file_id
+
+
+async def send_media_copy(
+    context: ContextTypes.DEFAULT_TYPE,
+    data: dict,
+    header: str,
+    *,
+    reupload: bool = False,
+    text_label: str = "Текст",
+) -> None:
+    bot = context.bot
+    content_type = data.get("content_type")
+    file_id = data.get("file_id")
+    caption_text = data.get("caption")
+    text_content = data.get("text")
+    target = data.get("notify_user_id")
+    if not target:
+        logger.error("send_media_copy: нет notify_user_id")
+        return
+
+    try:
+        if content_type == "text":
+            full_text = f"{header}\n\n<b>{text_label}:</b> {text_content or ''}"
+            await bot.send_message(
+                chat_id=target,
+                text=full_text,
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        if not file_id:
+            extra = text_content or "[Медиа недоступно]"
+            await bot.send_message(
+                chat_id=target,
+                text=f"{header}\n\n{extra}",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        payload = await _media_payload(
+            bot,
+            file_id,
+            data.get("file_name"),
+            reupload=reupload,
+        )
+        caption = header
+        if caption_text:
+            caption += f"\n\n<b>Подпись:</b> {caption_text}"
+
+        if content_type == "photo":
+            await bot.send_photo(
+                chat_id=target, photo=payload, caption=caption, parse_mode=ParseMode.HTML
+            )
+        elif content_type == "video":
+            await bot.send_video(
+                chat_id=target, video=payload, caption=caption, parse_mode=ParseMode.HTML
+            )
+        elif content_type == "document":
+            await bot.send_document(
+                chat_id=target, document=payload, caption=caption, parse_mode=ParseMode.HTML
+            )
+        elif content_type == "voice":
+            await bot.send_voice(
+                chat_id=target, voice=payload, caption=caption, parse_mode=ParseMode.HTML
+            )
+        elif content_type == "audio":
+            await bot.send_audio(
+                chat_id=target, audio=payload, caption=caption, parse_mode=ParseMode.HTML
+            )
+        elif content_type == "animation":
+            await bot.send_animation(
+                chat_id=target, animation=payload, caption=caption, parse_mode=ParseMode.HTML
+            )
+        elif content_type == "sticker":
+            info_msg = await bot.send_message(chat_id=target, text=header, parse_mode=ParseMode.HTML)
+            await bot.send_sticker(
+                chat_id=target,
+                sticker=payload if isinstance(payload, str) else file_id,
+                reply_to_message_id=info_msg.message_id,
+            )
+        elif content_type == "video_note":
+            info_msg = await bot.send_message(chat_id=target, text=header, parse_mode=ParseMode.HTML)
+            await bot.send_video_note(
+                chat_id=target,
+                video_note=payload,
+                reply_to_message_id=info_msg.message_id,
+            )
+        else:
+            extra = text_content or "[Тип сообщения не удалось полностью восстановить]"
+            await bot.send_message(
+                chat_id=target,
+                text=f"{header}\n\n{extra}",
+                parse_mode=ParseMode.HTML,
+            )
+
+    except Exception as e:
+        logger.error("Ошибка при отправке копии медиа: %s", type(e).__name__)
+
 
 async def on_edited_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.edited_business_message
@@ -473,92 +652,11 @@ async def on_deleted_business_messages(update: Update, context: ContextTypes.DEF
 
 
 async def send_deleted_copy(context: ContextTypes.DEFAULT_TYPE, data: dict) -> None:
-    bot = context.bot
     sender = data.get("sender_name", "Неизвестный")
-    content_type = data.get("content_type")
-    file_id = data.get("file_id")
-    caption_text = data.get("caption")
-    text_content = data.get("text")
-    target = data.get("notify_user_id")
-    if not target:
-        logger.error("send_deleted_copy: нет notify_user_id")
-        return
-
     header = f"{EMOJI_TRASH} <b>Удалено сообщение от {sender}</b>"
-
-    try:
-        if content_type == "text":
-            full_text = f"{header}\n\n<b>Удалённый текст:</b> {text_content or ''}"
-            await bot.send_message(
-                chat_id=target,
-                text=full_text,
-                parse_mode=ParseMode.HTML,
-            )
-
-        elif content_type == "photo" and file_id:
-            caption = header
-            if caption_text:
-                caption += f"\n\n<b>Подпись:</b> {caption_text}"
-            await bot.send_photo(chat_id=target, photo=file_id, caption=caption, parse_mode=ParseMode.HTML)
-
-        elif content_type == "video" and file_id:
-            caption = header
-            if caption_text:
-                caption += f"\n\n<b>Подпись:</b> {caption_text}"
-            await bot.send_video(chat_id=target, video=file_id, caption=caption, parse_mode=ParseMode.HTML)
-
-        elif content_type == "document" and file_id:
-            caption = header
-            if caption_text:
-                caption += f"\n\n<b>Подпись:</b> {caption_text}"
-            await bot.send_document(chat_id=target, document=file_id, caption=caption, parse_mode=ParseMode.HTML)
-
-        elif content_type == "voice" and file_id:
-            caption = header
-            if caption_text:
-                caption += f"\n\n<b>Подпись:</b> {caption_text}"
-            await bot.send_voice(chat_id=target, voice=file_id, caption=caption, parse_mode=ParseMode.HTML)
-
-        elif content_type == "audio" and file_id:
-            caption = header
-            if caption_text:
-                caption += f"\n\n<b>Подпись:</b> {caption_text}"
-            await bot.send_audio(chat_id=target, audio=file_id, caption=caption, parse_mode=ParseMode.HTML)
-
-        elif content_type == "animation" and file_id:
-            caption = header
-            if caption_text:
-                caption += f"\n\n<b>Подпись:</b> {caption_text}"
-            await bot.send_animation(chat_id=target, animation=file_id, caption=caption, parse_mode=ParseMode.HTML)
-
-        elif content_type == "sticker" and file_id:
-            info_msg = await bot.send_message(chat_id=target, text=header, parse_mode=ParseMode.HTML)
-            await bot.send_sticker(
-                chat_id=target,
-                sticker=file_id,
-                reply_to_message_id=info_msg.message_id,
-            )
-
-        elif content_type == "video_note" and file_id:
-            info_msg = await bot.send_message(chat_id=target, text=header, parse_mode=ParseMode.HTML)
-            await bot.send_video_note(
-                chat_id=target,
-                video_note=file_id,
-                reply_to_message_id=info_msg.message_id,
-            )
-
-        else:
-            extra = text_content or "[Тип сообщения не удалось полностью восстановить]"
-            await bot.send_message(
-                chat_id=target,
-                text=f"{header}\n\n{extra}",
-                parse_mode=ParseMode.HTML,
-            )
-
-        logger.info("Копия удалённого сообщения отправлена (тип: %s)", content_type)
-
-    except Exception as e:
-        logger.error("Ошибка при отправке копии: %s", type(e).__name__)
+    await send_media_copy(
+        context, data, header, reupload=False, text_label="Удалённый текст"
+    )
 
 
 async def on_business_connection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
