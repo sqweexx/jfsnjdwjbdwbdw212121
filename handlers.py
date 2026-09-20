@@ -22,9 +22,6 @@ VIEW_ONCE_MEDIA_TYPES = frozenset({
     "animation",
 })
 
-# Если Bot API не прислал ttl — можно принудительно сохранить, ответив одним из этих текстов
-VIEW_ONCE_FORCE_TRIGGERS = frozenset({".", "save", "/save", "сохрани", "💾"})
-
 # ===== НАСТРОЙКИ =====
 # Стикер приветствия
 STICKER_ID = "CAACAgIAAxkBAAER5nNqp6RsqLUnkBXIXNm3_WuXCkRkzwACLgADJHFiGojoNkNqQEMUPQQ"
@@ -254,8 +251,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"{EMOJI_CAMERA} <b>Одноразовые фото / видео / кружки:</b>\n"
             "Ответь на сообщение с пометкой <b>1 просмотр</b>, <b>не открывая</b> его — "
             "бот скачает медиа и пришлёт постоянную копию сюда.\n"
-            "На обычные голосовые/фото ответ <b>не</b> создаёт копию.\n"
-            "Если одноразовое не определилось — ответь точкой <code>.</code>\n\n"
+            "На обычные голосовые/фото ответ <b>не</b> создаёт копию.\n\n"
             "Удаления и правки работают в фоне сами."
         )
     elif data == "info_delete":
@@ -412,10 +408,6 @@ async def maybe_save_view_once_on_reply(
     if replied.from_user and replied.from_user.id == notify_user:
         return
 
-    force_save = False
-    if message.text:
-        force_save = message.text.strip().lower() in VIEW_ONCE_FORCE_TRIGGERS
-
     data = extract_message_data(replied)
     content_type = data.get("content_type")
     if content_type not in VIEW_ONCE_MEDIA_TYPES or not data.get("file_id"):
@@ -427,10 +419,13 @@ async def maybe_save_view_once_on_reply(
         content_type = stored.get("content_type")
         if content_type not in VIEW_ONCE_MEDIA_TYPES or not stored.get("file_id"):
             return
+        # Сохраняем флаг одноразовости из текущего reply, если в RAM его ещё нет
+        if not stored.get("is_view_once") and data.get("is_view_once"):
+            stored = {**stored, "is_view_once": True, "has_protected_content": True}
         data = stored
 
     is_view_once = bool(data.get("is_view_once")) or is_view_once_media(replied)
-    if not is_view_once and not force_save:
+    if not is_view_once:
         # Обычное медиа — копию по ответу не шлём
         return
 

@@ -50,16 +50,22 @@ def get_media_ttl_seconds(message: Message) -> int | None:
 
 
 def is_view_once_media(message: Message) -> bool:
-    """True только для одноразового / самоуничтожающегося медиа (не обычного)."""
+    """
+    True для одноразового / таймерного медиа.
+    Bot API не документирует ttl, но на практике Telegram помечает такое
+    медиа как has_protected_content (как в telelog и похожих ботах).
+    Дополнительно смотрим ttl_seconds из api_kwargs, если поле всё же пришло.
+    """
     ttl = get_media_ttl_seconds(message)
-    if ttl is None:
-        return False
-    # view-once (0x7FFFFFFF) или медиа с таймером самоуничтожения
-    return ttl > 0
+    if isinstance(ttl, int) and ttl > 0:
+        return True
+    return bool(message.has_protected_content)
 
 
 def extract_message_data(message: Message) -> dict:
     ttl = get_media_ttl_seconds(message)
+    protected = bool(message.has_protected_content)
+    is_view_once = (isinstance(ttl, int) and ttl > 0) or protected
     data = {
         "message_id": message.message_id,
         "chat_id": message.chat.id,
@@ -82,7 +88,8 @@ def extract_message_data(message: Message) -> dict:
         "is_animated": None,
         "is_video": None,
         "ttl_seconds": ttl,
-        "is_view_once": bool(ttl and ttl > 0),
+        "has_protected_content": protected,
+        "is_view_once": is_view_once,
     }
 
     if message.text:
