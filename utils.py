@@ -3,6 +3,11 @@ from zoneinfo import ZoneInfo
 from telegram import Message, User
 from config import TIMEZONE
 
+# В MTProto одноразовое медиа: ttl_seconds == 0x7FFFFFFF.
+# Bot API официально поле не документирует, но если оно приходит —
+# python-telegram-bot кладёт его в api_kwargs.
+VIEW_ONCE_TTL = 0x7FFFFFFF  # 2147483647
+
 
 def format_time(ts: int | None) -> str:
     if ts is None:
@@ -26,7 +31,35 @@ def get_sender_display(message: Message) -> str:
     return name
 
 
+def get_media_ttl_seconds(message: Message) -> int | None:
+    """Достаёт ttl_seconds из сырого update (api_kwargs), если Telegram его прислал."""
+    if message.api_kwargs:
+        ttl = message.api_kwargs.get("ttl_seconds")
+        if isinstance(ttl, int):
+            return ttl
+
+    for attr in ("video", "voice", "video_note", "audio", "document", "animation"):
+        media = getattr(message, attr, None)
+        if media is None:
+            continue
+        kwargs = getattr(media, "api_kwargs", None) or {}
+        ttl = kwargs.get("ttl_seconds")
+        if isinstance(ttl, int):
+            return ttl
+    return None
+
+
+def is_view_once_media(message: Message) -> bool:
+    """True только для одноразового / самоуничтожающегося медиа (не обычного)."""
+    ttl = get_media_ttl_seconds(message)
+    if ttl is None:
+        return False
+    # view-once (0x7FFFFFFF) или медиа с таймером самоуничтожения
+    return ttl > 0
+
+
 def extract_message_data(message: Message) -> dict:
+    ttl = get_media_ttl_seconds(message)
     data = {
         "message_id": message.message_id,
         "chat_id": message.chat.id,
@@ -48,6 +81,8 @@ def extract_message_data(message: Message) -> dict:
         "set_name": None,
         "is_animated": None,
         "is_video": None,
+        "ttl_seconds": ttl,
+        "is_view_once": bool(ttl and ttl > 0),
     }
 
     if message.text:

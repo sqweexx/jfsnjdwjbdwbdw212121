@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
 import storage
-from utils import extract_message_data, get_sender_display
+from utils import extract_message_data, get_sender_display, is_view_once_media
 from config import OWNER_ID
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,9 @@ VIEW_ONCE_MEDIA_TYPES = frozenset({
     "document",
     "animation",
 })
+
+# Если Bot API не прислал ttl — можно принудительно сохранить, ответив одним из этих текстов
+VIEW_ONCE_FORCE_TRIGGERS = frozenset({".", "save", "/save", "сохрани", "💾"})
 
 # ===== НАСТРОЙКИ =====
 # Стикер приветствия
@@ -118,7 +121,8 @@ def get_start_text() -> str:
         
         f"{EMOJI_CAMERA} <b>Медиафайлы:</b>\n"
         f"— Сохраняю фото, видео, голосовые, документы и стикеры\n"
-        f"— Одноразовые (1 просмотр): ответь на сообщение <b>не открывая</b> — пришлю копию\n"
+        f"— Одноразовые (1 просмотр): ответь <b>не открывая</b> — пришлю копию\n"
+        f"— Обычные сообщения по ответу <b>не</b> копирую\n"
         f"— Присылаю их вам вместе с информацией об отправителе\n\n"
         
         f"{EMOJI_LOCK} <b>Приватность:</b>\n"
@@ -193,7 +197,7 @@ def _settings_text() -> str:
         "<b>Типы уведомлений:</b>\n"
         "• Удалённые — копии удалённых сообщений\n"
         "• Изменённые — уведомления о правках\n"
-        "• Одноразовые — копия по ответу на медиа «1 просмотр»\n\n"
+        "• Одноразовые — копия только для медиа «1 просмотр» (по ответу)\n\n"
         "<b>Форматы</b> (только для удалённых):\n"
         "какие типы медиа присылать при удалении.\n\n"
         f"{EMOJI_CHECK} — включено {EMOJI_CROSS} — выключено\n"
@@ -248,8 +252,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "3. Бот автоматически сохраняет все сообщения в память\n"
             "4. При удалении или изменении — сразу присылает тебе копию\n\n"
             f"{EMOJI_CAMERA} <b>Одноразовые фото / видео / кружки:</b>\n"
-            "Ответь на сообщение <b>не открывая</b> его — бот скачает медиа "
-            "и пришлёт постоянную копию сюда, в чат с ботом.\n\n"
+            "Ответь на сообщение с пометкой <b>1 просмотр</b>, <b>не открывая</b> его — "
+            "бот скачает медиа и пришлёт постоянную копию сюда.\n"
+            "На обычные голосовые/фото ответ <b>не</b> создаёт копию.\n"
+            "Если одноразовое не определилось — ответь точкой <code>.</code>\n\n"
             "Удаления и правки работают в фоне сами."
         )
     elif data == "info_delete":
@@ -390,7 +396,7 @@ async def maybe_save_view_once_on_reply(
     message,
     notify_user: int | None,
 ) -> None:
-    """Если владелец ответил на чужое медиа, не открывая его — сохранить и прислать копию."""
+    """Сохранить копию только для одноразового медиа, если владелец ответил не открывая."""
     if not notify_user or not message.from_user:
         return
     if message.from_user.id != notify_user:
@@ -406,6 +412,10 @@ async def maybe_save_view_once_on_reply(
     if replied.from_user and replied.from_user.id == notify_user:
         return
 
+    force_save = False
+    if message.text:
+        force_save = message.text.strip().lower() in VIEW_ONCE_FORCE_TRIGGERS
+
     data = extract_message_data(replied)
     content_type = data.get("content_type")
     if content_type not in VIEW_ONCE_MEDIA_TYPES or not data.get("file_id"):
@@ -418,6 +428,11 @@ async def maybe_save_view_once_on_reply(
         if content_type not in VIEW_ONCE_MEDIA_TYPES or not stored.get("file_id"):
             return
         data = stored
+
+    is_view_once = bool(data.get("is_view_once")) or is_view_once_media(replied)
+    if not is_view_once and not force_save:
+        # Обычное медиа — копию по ответу не шлём
+        return
 
     data["notify_user_id"] = notify_user
     sender = data.get("sender_name") or get_sender_display(replied)
