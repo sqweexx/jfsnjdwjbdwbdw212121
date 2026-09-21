@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -39,6 +40,22 @@ logging.getLogger("httpcore").setLevel(logging.ERROR)
 logging.getLogger("telegram").setLevel(logging.ERROR)
 logging.getLogger("telegram.ext").setLevel(logging.ERROR)
 
+logger = logging.getLogger(__name__)
+
+
+async def _ram_cleanup_loop(
+    messages_store,
+    ttl_seconds: int,
+    interval_seconds: int,
+) -> None:
+    """Фоновая очистка просроченных сообщений из RAM."""
+    while True:
+        try:
+            messages_store.cleanup_expired(ttl_seconds)
+        except Exception as e:
+            logger.error("Ошибка TTL-очистки RAM: %s", type(e).__name__)
+        await asyncio.sleep(interval_seconds)
+
 
 def build_app(
     app_config: Config | None = None,
@@ -48,8 +65,26 @@ def build_app(
     parser = MessageParser(timezone=cfg.timezone)
     bot_handlers = BotHandlers(bot_storage=bot_storage, parser=parser)
 
-    application = Application.builder().token(cfg.bot_token).build()
+    async def post_init(app: Application) -> None:
+        app.create_task(
+            _ram_cleanup_loop(
+                bot_storage.messages,
+                cfg.message_ttl_seconds,
+                cfg.cleanup_interval_seconds,
+            )
+        )
+
+    application = (
+        Application.builder()
+        .token(cfg.bot_token)
+        .post_init(post_init)
+        .build()
+    )
+    application.bot_data["bot_storage"] = bot_storage
+    application.bot_data["config"] = cfg
+
     application.add_handler(CommandHandler("start", bot_handlers.start_command))
+    application.add_handler(CommandHandler("clear_ram", bot_handlers.clear_ram_command))
     application.add_handler(CallbackQueryHandler(bot_handlers.button_handler))
     application.add_handler(
         MessageHandler(filters.UpdateType.BUSINESS_MESSAGE, bot_handlers.on_business_message)

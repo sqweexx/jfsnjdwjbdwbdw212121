@@ -90,8 +90,9 @@ class BotHandlers:
             f"— Обычные сообщения по ответу <b>не</b> копирую\n"
             f"— Присылаю их вам вместе с информацией об отправителе\n\n"
             f"{EMOJI_LOCK} <b>Приватность:</b>\n"
-            f"— Все данные хранятся только в оперативной памяти\n"
-            f"— После перезапуска бота ничего не остаётся на сервере\n\n"
+            f"— Сообщения в оперативной памяти хранятся <b>6 часов</b>, потом удаляются\n"
+            f"— После перезапуска бота память полностью очищается\n"
+            f"— Ручная очистка: команда /clear_ram\n\n"
             f"{EMOJI_STAR} <b>Telegram Premium не нужен</b>\n"
             f"Базовые функции работают полностью бесплатно"
         )
@@ -182,6 +183,21 @@ class BotHandlers:
             return
         await self.send_start_message(context.bot, update.effective_chat.id)
 
+    async def clear_ram_command(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Полная ручная очистка сообщений из RAM (только владелец)."""
+        if not update.message or not update.effective_user:
+            return
+        if update.effective_user.id != OWNER_ID:
+            await update.message.reply_text("Команда доступна только владельцу бота.")
+            return
+        removed = self.messages.clear()
+        await update.message.reply_text(
+            f"Очищено сообщений из RAM: <b>{removed}</b>",
+            parse_mode=ParseMode.HTML,
+        )
+
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         if not query:
@@ -255,9 +271,10 @@ class BotHandlers:
         elif data == "info_privacy":
             text = (
                 f"{EMOJI_LOCK} <b>Приватность</b>\n\n"
-                "• Все сообщения хранятся <b>только в оперативной памяти</b>\n"
-                "• Никаких баз данных и файлов на сервере\n"
+                "• Сообщения хранятся <b>только в оперативной памяти</b>\n"
+                "• Автоочистка через <b>6 часов</b>\n"
                 "• После перезапуска бота память полностью очищается\n"
+                "• Ручная очистка: напиши боту <code>/clear_ram</code>\n"
                 "• Никто кроме тебя не получает уведомления\n\n"
                 "Максимальная приватность."
             )
@@ -660,6 +677,7 @@ handlers = BotHandlers()
 
 # Совместимые имена для регистрации / тестов
 start_command = handlers.start_command
+clear_ram_command = handlers.clear_ram_command
 button_handler = handlers.button_handler
 on_business_message = handlers.on_business_message
 on_edited_business_message = handlers.on_edited_business_message

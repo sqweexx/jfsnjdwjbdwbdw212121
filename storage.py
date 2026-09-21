@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -24,6 +25,8 @@ __all__ = [
     "get",
     "pop",
     "cleanup_old",
+    "cleanup_expired",
+    "clear_messages",
     "size",
     "save_connection",
     "remove_connection",
@@ -35,7 +38,7 @@ __all__ = [
 
 
 class MessageStore:
-    """Временное хранилище business-сообщений (только RAM)."""
+    """Временное хранилище business-сообщений (только RAM) с TTL."""
 
     def __init__(self) -> None:
         self._messages: dict[tuple[str, int, int], dict[str, Any]] = {}
@@ -44,8 +47,10 @@ class MessageStore:
     def store(
         self, connection_id: str, chat_id: int, message_id: int, data: dict[str, Any]
     ) -> None:
+        record = dict(data)
+        record["_stored_at"] = time.time()
         with self._lock:
-            self._messages[(connection_id or "", chat_id, message_id)] = data
+            self._messages[(connection_id or "", chat_id, message_id)] = record
 
     def get(
         self, connection_id: str, chat_id: int, message_id: int
@@ -69,10 +74,29 @@ class MessageStore:
                 del self._messages[key]
             return to_remove
 
+    def cleanup_expired(self, ttl_seconds: float) -> int:
+        """Удалить записи старше ttl_seconds. Возвращает число удалённых."""
+        cutoff = time.time() - ttl_seconds
+        with self._lock:
+            expired = [
+                key
+                for key, value in self._messages.items()
+                if float(value.get("_stored_at") or 0) < cutoff
+            ]
+            for key in expired:
+                del self._messages[key]
+            return len(expired)
+
+    def clear(self) -> int:
+        """Полностью очистить RAM-хранилище сообщений."""
+        with self._lock:
+            count = len(self._messages)
+            self._messages.clear()
+            return count
+
     def size(self) -> int:
         with self._lock:
             return len(self._messages)
-
 
 class ConnectionStore:
     """Кэш business-подключений: connection_id -> user_id (только RAM)."""
@@ -142,6 +166,14 @@ def pop(connection_id: str, chat_id: int, message_id: int) -> dict[str, Any] | N
 
 def cleanup_old(max_size: int = 5000) -> int:
     return messages.cleanup_old(max_size)
+
+
+def cleanup_expired(ttl_seconds: float) -> int:
+    return messages.cleanup_expired(ttl_seconds)
+
+
+def clear_messages() -> int:
+    return messages.clear()
 
 
 def size() -> int:
