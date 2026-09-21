@@ -12,7 +12,6 @@ import storage
 from config import OWNER_ID
 from constants import (
     BOT_USERNAME,
-    BTN_EMOJI_CONNECT,
     BTN_EMOJI_DELETE,
     BTN_EMOJI_EDIT,
     BTN_EMOJI_HOW,
@@ -85,7 +84,8 @@ class BotHandlers:
             ],
             [self._btn("Приватность", "info_privacy", BTN_EMOJI_PRIVACY)],
             [self._btn("Общие настройки", "settings_menu", BTN_EMOJI_SETTINGS)],
-            [self._btn("Подключение бота", "info_connect", BTN_EMOJI_CONNECT)],
+            # Без premium-иконки — как просили не трогать
+            [InlineKeyboardButton("🔌 Подключение бота", callback_data="info_connect")],
         ]
         return InlineKeyboardMarkup(keyboard)
 
