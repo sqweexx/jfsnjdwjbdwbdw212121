@@ -4,24 +4,18 @@ from pathlib import Path
 
 from telegram.ext import (
     Application,
+    BusinessConnectionHandler,
+    BusinessMessagesDeletedHandler,
+    CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
-    BusinessMessagesDeletedHandler,
-    BusinessConnectionHandler,
     filters,
 )
 
 from config import BOT_TOKEN
-from handlers import (
-    start_command,
-    button_handler,
-    on_business_message,
-    on_edited_business_message,
-    on_deleted_business_messages,
-    on_business_connection,
-    error_handler,
-)
+from handlers import BotHandlers
+from settings import UserSettingsStore
+from storage import ConnectionStore, MessageStore
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -40,48 +34,47 @@ logging.basicConfig(
     handlers=[_file_handler, _console_handler],
 )
 
-# Библиотеки — только ошибки, без INFO/WARNING-спама
 logging.getLogger("httpx").setLevel(logging.ERROR)
 logging.getLogger("httpcore").setLevel(logging.ERROR)
 logging.getLogger("telegram").setLevel(logging.ERROR)
 logging.getLogger("telegram.ext").setLevel(logging.ERROR)
 
 
+def build_handlers() -> BotHandlers:
+    return BotHandlers(
+        messages=MessageStore(),
+        connections=ConnectionStore(),
+        settings=UserSettingsStore(DATA_DIR / "settings.json"),
+    )
+
+
 def main() -> None:
+    bot_handlers = build_handlers()
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Команда /start
-    application.add_handler(CommandHandler("start", start_command))
-
-    # Кнопки меню
-    application.add_handler(CallbackQueryHandler(button_handler))
-
-    # Новые бизнес-сообщения
+    application.add_handler(CommandHandler("start", bot_handlers.start_command))
+    application.add_handler(CallbackQueryHandler(bot_handlers.button_handler))
     application.add_handler(
-        MessageHandler(filters.UpdateType.BUSINESS_MESSAGE, on_business_message)
+        MessageHandler(filters.UpdateType.BUSINESS_MESSAGE, bot_handlers.on_business_message)
     )
-
-    # Редактирование
     application.add_handler(
-        MessageHandler(filters.UpdateType.EDITED_BUSINESS_MESSAGE, on_edited_business_message)
+        MessageHandler(
+            filters.UpdateType.EDITED_BUSINESS_MESSAGE,
+            bot_handlers.on_edited_business_message,
+        )
     )
-
-    # Удаление
     application.add_handler(
-        BusinessMessagesDeletedHandler(on_deleted_business_messages)
+        BusinessMessagesDeletedHandler(bot_handlers.on_deleted_business_messages)
     )
-
-    # Подключение Business
     application.add_handler(
-        BusinessConnectionHandler(on_business_connection)
+        BusinessConnectionHandler(bot_handlers.on_business_connection)
     )
-
-    application.add_error_handler(error_handler)
+    application.add_error_handler(bot_handlers.error_handler)
 
     application.run_polling(
         allowed_updates=[
-            "message",                    # нужно для /start
-            "callback_query",             # нужно для кнопок
+            "message",
+            "callback_query",
             "business_connection",
             "business_message",
             "edited_business_message",
