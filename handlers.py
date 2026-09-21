@@ -16,6 +16,7 @@ from constants import (
     BTN_EMOJI_EDIT,
     BTN_EMOJI_HOW,
     BTN_EMOJI_PRIVACY,
+    BTN_EMOJI_CONNECT,
     BTN_EMOJI_SETTINGS,
     CONNECT_PHOTO_ID,
     EMOJI_BACK,
@@ -85,7 +86,7 @@ class BotHandlers:
             [self._btn("Приватность", "info_privacy", BTN_EMOJI_PRIVACY)],
             [self._btn("Общие настройки", "settings_menu", BTN_EMOJI_SETTINGS)],
             # Без premium-иконки — как просили не трогать
-            [InlineKeyboardButton("🔌 Подключение бота", callback_data="info_connect")],
+            [self._btn("Подключение бота", "info_connect", BTN_EMOJI_CONNECT)],
         ]
         return InlineKeyboardMarkup(keyboard)
 
