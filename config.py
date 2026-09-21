@@ -14,8 +14,8 @@ class Config:
         self.bot_token = os.getenv("BOT_TOKEN")
         self.owner_id = int(os.getenv("OWNER_ID", "0"))
         self.timezone = os.getenv("TIMEZONE", "Europe/Prague")
-        # Сообщения в RAM: хранить 6 часов, чистить раз в 2 минуты
-        self.message_ttl_seconds = int(os.getenv("MESSAGE_TTL_SECONDS", str(6 * 3600)))
+        # Сообщения в RAM: хранить 3 часа, чистить раз в 2 минуты
+        self.message_ttl_seconds = int(os.getenv("MESSAGE_TTL_SECONDS", str(3 * 3600)))
         self.cleanup_interval_seconds = int(os.getenv("CLEANUP_INTERVAL_SECONDS", "120"))
         self.validate()
 

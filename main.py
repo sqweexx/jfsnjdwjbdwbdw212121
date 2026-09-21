@@ -84,7 +84,6 @@ def build_app(
     application.bot_data["config"] = cfg
 
     application.add_handler(CommandHandler("start", bot_handlers.start_command))
-    application.add_handler(CommandHandler("clear_ram", bot_handlers.clear_ram_command))
     application.add_handler(CallbackQueryHandler(bot_handlers.button_handler))
     application.add_handler(
         MessageHandler(filters.UpdateType.BUSINESS_MESSAGE, bot_handlers.on_business_message)
