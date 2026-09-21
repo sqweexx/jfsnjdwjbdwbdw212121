@@ -11,21 +11,6 @@ from config import config
 # В MTProto одноразовое медиа: ttl_seconds == 0x7FFFFFFF.
 VIEW_ONCE_TTL = 0x7FFFFFFF  # 2147483647
 
-# В RAM только метаданные — без текста, caption, file_id и прочего содержимого.
-RAM_METADATA_KEYS = (
-    "message_id",
-    "chat_id",
-    "date",
-    "sender_name",
-    "sender_id",
-    "business_connection_id",
-    "notify_user_id",
-    "content_type",
-    "ttl_seconds",
-    "has_protected_content",
-    "is_view_once",
-)
-
 
 class MessageParser:
     """Хелперы для извлечения данных и определения одноразового медиа."""
@@ -196,10 +181,6 @@ class MessageParser:
 
         return data
 
-    def to_ram_record(self, data: dict) -> dict:
-        """Урезанная запись для RAM: тип и служебные id, без содержимого сообщения."""
-        return {key: data.get(key) for key in RAM_METADATA_KEYS}
-
 
 # Синглтон + совместимые функции
 message_parser = MessageParser()
@@ -223,7 +204,3 @@ def is_view_once_media(message: Message) -> bool:
 
 def extract_message_data(message: Message) -> dict:
     return message_parser.extract_message_data(message)
-
-
-def to_ram_record(data: dict) -> dict:
-    return message_parser.to_ram_record(data)
