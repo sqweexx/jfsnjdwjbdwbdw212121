@@ -83,15 +83,15 @@ class BotHandlers:
             f"— Показываю <b>старое</b> сообщение и <b>новое</b> (изменённое)\n"
             f"— Указываю автора и его @username\n\n"
             f"{EMOJI_TRASH} <b>Удаление сообщений:</b>\n"
-            f"— Пересылаю любые форматы: текст, фото, видео, кружки, стикеры, документы, локации...\n\n"
+            f"— Уведомляю об удалении (тип сообщения), без хранения текста/медиа\n\n"
             f"{EMOJI_CAMERA} <b>Медиафайлы:</b>\n"
             f"— Сохраняю фото, видео, голосовые, документы и стикеры\n"
             f"— Одноразовые (1 просмотр): ответь <b>не открывая</b> — пришлю копию\n"
             f"— Обычные сообщения по ответу <b>не</b> копирую\n"
             f"— Присылаю их вам вместе с информацией об отправителе\n\n"
             f"{EMOJI_LOCK} <b>Приватность:</b>\n"
-            f"— Все данные хранятся только в оперативной памяти\n"
-            f"— После перезапуска бота ничего не остаётся на сервере\n\n"
+            f"— В памяти только метаданные (id, тип, отправитель), без текста и file_id\n"
+            f"— После перезапуска бота память полностью очищается\n\n"
             f"{EMOJI_STAR} <b>Telegram Premium не нужен</b>\n"
             f"Базовые функции работают полностью бесплатно"
         )
@@ -131,11 +131,11 @@ class BotHandlers:
         return (
             f"{EMOJI_GEAR} <b>Общие настройки</b>\n\n"
             "<b>Типы уведомлений:</b>\n"
-            "• Удалённые — копии удалённых сообщений\n"
-            "• Изменённые — уведомления о правках\n"
-            "• Одноразовые — копия только для медиа «1 просмотр» (по ответу)\n\n"
-            "<b>Форматы</b> (только для удалённых):\n"
-            "какие типы медиа присылать при удалении.\n\n"
+            "• Удалённые — факт удаления + тип (без текста/медиа)\n"
+            "• Изменённые — факт правки + тип\n"
+            "• Одноразовые — копия по ответу на медиа «1 просмотр»\n\n"
+            "<b>Форматы</b> (фильтр для уведомлений об удалении):\n"
+            "о каких типах сообщений уведомлять.\n\n"
             f"{EMOJI_CHECK} — включено {EMOJI_CROSS} — выключено\n"
             "Нажмите на пункт, чтобы переключить."
         )
@@ -235,29 +235,25 @@ class BotHandlers:
             text = (
                 f"{EMOJI_TRASH} <b>Уведомления об удалении</b>\n\n"
                 "Когда кто-то удаляет сообщение в отслеживаемом чате, "
-                "бот присылает тебе его копию:\n\n"
-                "• Текст\n"
-                "• Фото и видео\n"
-                "• Голосовые и кружки\n"
-                "• Документы и стикеры\n"
-                "• Геолокацию, контакты и опросы\n\n"
-                "Вместе с сообщением указывается <b>автор</b>."
+                "бот присылает уведомление:\n\n"
+                "• Кто автор\n"
+                "• Тип сообщения (текст, фото, голосовое…)\n\n"
+                "Сам текст и медиа <b>не хранятся</b> и в уведомление не попадают."
             )
         elif data == "info_edit":
             text = (
                 f"{EMOJI_EDIT} <b>Уведомления об изменении</b>\n\n"
-                "Если сообщение отредактировали, бот покажет:\n\n"
-                "• <b>Старое</b> содержимое\n"
-                "• <b>Новое</b> (изменённое) содержимое\n"
-                "• Кто именно изменил сообщение\n\n"
-                "Так ты всегда видишь, что пытались скрыть."
+                "Если сообщение отредактировали, бот сообщит:\n\n"
+                "• Кто изменил\n"
+                "• Тип сообщения\n\n"
+                "Старый/новый текст в память <b>не сохраняется</b>."
             )
         elif data == "info_privacy":
             text = (
                 f"{EMOJI_LOCK} <b>Приватность</b>\n\n"
-                "• Все сообщения хранятся <b>только в оперативной памяти</b>\n"
-                "• Никаких баз данных и файлов на сервере\n"
-                "• После перезапуска бота память полностью очищается\n"
+                "• В оперативной памяти только <b>метаданные</b>: id, тип, отправитель\n"
+                "• Текст, подписи и file_id <b>не сохраняются</b>\n"
+                "• После перезапуска бота память очищается\n"
                 "• Никто кроме тебя не получает уведомления\n\n"
                 "Максимальная приватность."
             )
@@ -345,11 +341,12 @@ class BotHandlers:
         data["notify_user_id"] = notify_user
         data["business_connection_id"] = message.business_connection_id
 
+        # В RAM только метаданные (без текста / file_id)
         self.messages.store(
             message.business_connection_id or "",
             message.chat.id,
             message.message_id,
-            data,
+            self.parser.to_ram_record(data),
         )
         self.messages.cleanup_old(max_size=4000)
 
@@ -377,18 +374,17 @@ class BotHandlers:
         data = self.parser.extract_message_data(replied)
         content_type = data.get("content_type")
         if content_type not in VIEW_ONCE_MEDIA_TYPES or not data.get("file_id"):
-            conn_id = message.business_connection_id or ""
-            stored = self.messages.get(conn_id, replied.chat.id, replied.message_id)
-            if not stored:
-                return
-            content_type = stored.get("content_type")
-            if content_type not in VIEW_ONCE_MEDIA_TYPES or not stored.get("file_id"):
-                return
-            if not stored.get("is_view_once") and data.get("is_view_once"):
-                stored = {**stored, "is_view_once": True, "has_protected_content": True}
-            data = stored
+            # Контент берём только из reply_to_message; RAM больше не хранит file_id
+            return
 
-        is_view_once = bool(data.get("is_view_once")) or self.parser.is_view_once_media(replied)
+        # Флаг одноразовости: из текущего reply или из метаданных в RAM
+        conn_id = message.business_connection_id or ""
+        stored = self.messages.get(conn_id, replied.chat.id, replied.message_id)
+        is_view_once = (
+            bool(data.get("is_view_once"))
+            or self.parser.is_view_once_media(replied)
+            or bool(stored and stored.get("is_view_once"))
+        )
         if not is_view_once:
             return
 
@@ -540,7 +536,7 @@ class BotHandlers:
             notify_user = old_data.get("notify_user_id")
         new_data["notify_user_id"] = notify_user
 
-        self.messages.store(conn_id, chat_id, msg_id, new_data)
+        self.messages.store(conn_id, chat_id, msg_id, self.parser.to_ram_record(new_data))
 
         if not notify_user:
             return
@@ -555,20 +551,15 @@ class BotHandlers:
         if not old_data:
             return
 
+        # Старый текст в RAM не храним — уведомляем только о факте правки и типе
         sender = new_data.get("sender_name") or self.parser.get_sender_display(message)
-        header = f"{EMOJI_EDIT} <b>Изменено сообщение от {sender}</b>"
-        old_text = old_data.get("text") or old_data.get("caption") or ""
-        new_text = new_data.get("text") or new_data.get("caption") or ""
-
-        if old_text == new_text and old_data.get("file_id") == new_data.get("file_id"):
-            return
-
+        ctype = new_data.get("content_type") or old_data.get("content_type") or "unknown"
+        body = (
+            f"{EMOJI_EDIT} <b>Изменено сообщение от {sender}</b>\n"
+            f"<code>тип: {ctype}</code>\n\n"
+            "Содержимое не сохранялось (только метаданные)."
+        )
         try:
-            body = (
-                f"{header}\n\n"
-                f"<b>Старое:</b> {old_text or '—'}\n"
-                f"<b>Новое:</b> {new_text or '—'}"
-            )
             await context.bot.send_message(
                 chat_id=notify_user,
                 text=body,
@@ -617,11 +608,26 @@ class BotHandlers:
     async def send_deleted_copy(
         self, context: ContextTypes.DEFAULT_TYPE, data: dict
     ) -> None:
+        """Уведомление об удалении без содержимого — в RAM его больше нет."""
         sender = data.get("sender_name", "Неизвестный")
-        header = f"{EMOJI_TRASH} <b>Удалено сообщение от {sender}</b>"
-        await self.send_media_copy(
-            context, data, header, reupload=False, text_label="Удалённый текст"
+        ctype = data.get("content_type") or "unknown"
+        target = data.get("notify_user_id")
+        if not target:
+            logger.error("send_deleted_copy: нет notify_user_id")
+            return
+
+        body = (
+            f"{EMOJI_TRASH} <b>Удалено сообщение от {sender}</b>\n"
+            f"<code>тип: {ctype}</code>"
         )
+        try:
+            await context.bot.send_message(
+                chat_id=target,
+                text=body,
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception as e:
+            logger.error("Ошибка при отправке копии: %s", type(e).__name__)
 
     async def on_business_connection(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
