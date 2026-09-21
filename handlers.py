@@ -12,6 +12,12 @@ import storage
 from config import OWNER_ID
 from constants import (
     BOT_USERNAME,
+    BTN_EMOJI_CONNECT,
+    BTN_EMOJI_DELETE,
+    BTN_EMOJI_EDIT,
+    BTN_EMOJI_HOW,
+    BTN_EMOJI_PRIVACY,
+    BTN_EMOJI_SETTINGS,
     CONNECT_PHOTO_ID,
     EMOJI_BACK,
     EMOJI_CAMERA,

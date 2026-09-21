@@ -36,7 +36,7 @@ EMOJI_BACK = "↩️"
 EMOJI_CHECK = "✅"
 EMOJI_CROSS = "❌"
 
-# Premium-эмодзи для кнопок (icon_custom_emoji_id) — на будущее
+# Premium-эмодзи для кнопок (icon_custom_emoji_id)
 BTN_EMOJI_HOW = "6021618194228187816"
 BTN_EMOJI_DELETE = "5879896690210639947"
 BTN_EMOJI_EDIT = "5879841310902324730"
