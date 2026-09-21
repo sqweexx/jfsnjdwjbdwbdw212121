@@ -27,8 +27,8 @@ from constants import (
     VIEW_ONCE_MEDIA_TYPES,
 )
 from settings import DEFAULT_SETTINGS, UserSettingsStore
-from storage import ConnectionStore, MessageStore
-from utils import extract_message_data, get_sender_display, is_view_once_media
+from storage import BotStorage, ConnectionStore, MessageStore
+from utils import MessageParser, message_parser
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +41,24 @@ class BotHandlers:
         messages: MessageStore | None = None,
         connections: ConnectionStore | None = None,
         settings: UserSettingsStore | None = None,
+        bot_storage: BotStorage | None = None,
+        parser: MessageParser | None = None,
     ) -> None:
-        self.messages = messages or storage.messages
-        self.connections = connections or storage.connections
-        self.settings = settings or storage.user_settings
+        if bot_storage is not None:
+            self.messages = bot_storage.messages
+            self.connections = bot_storage.connections
+            self.settings = bot_storage.settings
+            self.storage = bot_storage
+        else:
+            self.messages = messages or storage.messages
+            self.connections = connections or storage.connections
+            self.settings = settings or storage.user_settings
+            self.storage = BotStorage(
+                messages=self.messages,
+                connections=self.connections,
+                settings=self.settings,
+            )
+        self.parser = parser or message_parser
 
     # ----- UI -----
 
@@ -324,7 +338,7 @@ class BotHandlers:
         if not message:
             return
 
-        data = extract_message_data(message)
+        data = self.parser.extract_message_data(message)
         notify_user = await self.resolve_connection_user(
             context.bot, message.business_connection_id
         )
@@ -360,7 +374,7 @@ class BotHandlers:
         if replied.from_user and replied.from_user.id == notify_user:
             return
 
-        data = extract_message_data(replied)
+        data = self.parser.extract_message_data(replied)
         content_type = data.get("content_type")
         if content_type not in VIEW_ONCE_MEDIA_TYPES or not data.get("file_id"):
             conn_id = message.business_connection_id or ""
@@ -374,12 +388,12 @@ class BotHandlers:
                 stored = {**stored, "is_view_once": True, "has_protected_content": True}
             data = stored
 
-        is_view_once = bool(data.get("is_view_once")) or is_view_once_media(replied)
+        is_view_once = bool(data.get("is_view_once")) or self.parser.is_view_once_media(replied)
         if not is_view_once:
             return
 
         data["notify_user_id"] = notify_user
-        sender = data.get("sender_name") or get_sender_display(replied)
+        sender = data.get("sender_name") or self.parser.get_sender_display(replied)
         header = (
             f"{EMOJI_CAMERA} <b>Сохранено медиа от {sender}</b>\n"
             f"<code>одноразовое / по ответу</code>"
@@ -517,7 +531,7 @@ class BotHandlers:
         msg_id = message.message_id
         conn_id = message.business_connection_id or ""
         old_data = self.messages.get(conn_id, chat_id, msg_id)
-        new_data = extract_message_data(message)
+        new_data = self.parser.extract_message_data(message)
 
         notify_user = await self.resolve_connection_user(
             context.bot, message.business_connection_id
@@ -541,7 +555,7 @@ class BotHandlers:
         if not old_data:
             return
 
-        sender = new_data.get("sender_name") or get_sender_display(message)
+        sender = new_data.get("sender_name") or self.parser.get_sender_display(message)
         header = f"{EMOJI_EDIT} <b>Изменено сообщение от {sender}</b>"
         old_text = old_data.get("text") or old_data.get("caption") or ""
         new_text = new_data.get("text") or new_data.get("caption") or ""

@@ -12,10 +12,10 @@ from telegram.ext import (
     filters,
 )
 
-from config import BOT_TOKEN
+from config import Config, config
 from handlers import BotHandlers
-from settings import UserSettingsStore
-from storage import ConnectionStore, MessageStore
+from storage import BotStorage
+from utils import MessageParser
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -40,18 +40,15 @@ logging.getLogger("telegram").setLevel(logging.ERROR)
 logging.getLogger("telegram.ext").setLevel(logging.ERROR)
 
 
-def build_handlers() -> BotHandlers:
-    return BotHandlers(
-        messages=MessageStore(),
-        connections=ConnectionStore(),
-        settings=UserSettingsStore(DATA_DIR / "settings.json"),
-    )
+def build_app(
+    app_config: Config | None = None,
+) -> tuple[Application, BotHandlers]:
+    cfg = app_config or config
+    bot_storage = BotStorage(settings_path=DATA_DIR / "settings.json")
+    parser = MessageParser(timezone=cfg.timezone)
+    bot_handlers = BotHandlers(bot_storage=bot_storage, parser=parser)
 
-
-def main() -> None:
-    bot_handlers = build_handlers()
-    application = Application.builder().token(BOT_TOKEN).build()
-
+    application = Application.builder().token(cfg.bot_token).build()
     application.add_handler(CommandHandler("start", bot_handlers.start_command))
     application.add_handler(CallbackQueryHandler(bot_handlers.button_handler))
     application.add_handler(
@@ -70,7 +67,16 @@ def main() -> None:
         BusinessConnectionHandler(bot_handlers.on_business_connection)
     )
     application.add_error_handler(bot_handlers.error_handler)
+    return application, bot_handlers
 
+
+def build_handlers() -> BotHandlers:
+    _, bot_handlers = build_app()
+    return bot_handlers
+
+
+def main() -> None:
+    application, _ = build_app()
     application.run_polling(
         allowed_updates=[
             "message",

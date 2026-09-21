@@ -1,13 +1,31 @@
+"""Конфигурация бота из .env."""
+from __future__ import annotations
+
 import os
+
 from dotenv import load_dotenv
 
-load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = int(os.getenv("OWNER_ID", "0"))
-TIMEZONE = os.getenv("TIMEZONE", "Europe/Prague")
+class Config:
+    """Настройки окружения приложения."""
 
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN is required")
-if not OWNER_ID:
-    raise ValueError("OWNER_ID is required")
+    def __init__(self) -> None:
+        load_dotenv()
+        self.bot_token = os.getenv("BOT_TOKEN")
+        self.owner_id = int(os.getenv("OWNER_ID", "0"))
+        self.timezone = os.getenv("TIMEZONE", "Europe/Prague")
+        self.validate()
+
+    def validate(self) -> None:
+        if not self.bot_token:
+            raise ValueError("BOT_TOKEN is required")
+        if not self.owner_id:
+            raise ValueError("OWNER_ID is required")
+
+
+config = Config()
+
+# Совместимость со старыми импортами
+BOT_TOKEN = config.bot_token
+OWNER_ID = config.owner_id
+TIMEZONE = config.timezone

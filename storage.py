@@ -1,24 +1,25 @@
 """
-Хранилище в RAM: сообщения и business-подключения.
-Настройки пользователей — в settings.UserSettingsStore (диск).
-
-Ключ сообщения: (connection_id, chat_id, message_id).
+Хранилище приложения:
+- MessageStore / ConnectionStore — только RAM
+- UserSettingsStore — на диск (data/settings.json)
 """
 from __future__ import annotations
 
+from pathlib import Path
 from threading import Lock
 from typing import Any
 
 from settings import DEFAULT_SETTINGS, UserSettingsStore
 
-# Реэкспорт для совместимости импортов
 __all__ = [
     "DEFAULT_SETTINGS",
     "MessageStore",
     "ConnectionStore",
+    "BotStorage",
     "messages",
     "connections",
     "user_settings",
+    "storage",
     "store",
     "get",
     "pop",
@@ -95,13 +96,37 @@ class ConnectionStore:
             return self._connections.get(connection_id)
 
 
+class BotStorage:
+    """Фасад: сообщения + подключения + настройки пользователей."""
+
+    def __init__(
+        self,
+        messages: MessageStore | None = None,
+        connections: ConnectionStore | None = None,
+        settings: UserSettingsStore | None = None,
+        settings_path: Path | str | None = None,
+    ) -> None:
+        self.messages = messages or MessageStore()
+        self.connections = connections or ConnectionStore()
+        if settings is not None:
+            self.settings = settings
+        else:
+            path = Path(settings_path) if settings_path else Path("data") / "settings.json"
+            self.settings = UserSettingsStore(path)
+
+
 # Синглтоны приложения
 messages = MessageStore()
 connections = ConnectionStore()
 user_settings = UserSettingsStore()
+storage = BotStorage(
+    messages=messages,
+    connections=connections,
+    settings=user_settings,
+)
 
 
-# --- Совместимый модульный API (thin wrappers) ---
+# --- Совместимый модульный API ---
 
 def store(connection_id: str, chat_id: int, message_id: int, data: dict[str, Any]) -> None:
     messages.store(connection_id, chat_id, message_id, data)
