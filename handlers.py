@@ -68,16 +68,24 @@ class BotHandlers:
 
     # ----- UI -----
 
+    @staticmethod
+    def _btn(text: str, callback_data: str, icon_emoji_id: str | None = None) -> InlineKeyboardButton:
+        """Кнопка меню; при наличии id — premium-иконка (icon_custom_emoji_id)."""
+        kwargs: dict = {"text": text, "callback_data": callback_data}
+        if icon_emoji_id:
+            kwargs["api_kwargs"] = {"icon_custom_emoji_id": icon_emoji_id}
+        return InlineKeyboardButton(**kwargs)
+
     def get_main_keyboard(self) -> InlineKeyboardMarkup:
         keyboard = [
-            [InlineKeyboardButton("ℹ️ Как работает бот", callback_data="info_how")],
+            [self._btn("Как работает бот", "info_how", BTN_EMOJI_HOW)],
             [
-                InlineKeyboardButton("🗑 Удаления", callback_data="info_delete"),
-                InlineKeyboardButton("✏️ Изменения", callback_data="info_edit"),
+                self._btn("Удаления", "info_delete", BTN_EMOJI_DELETE),
+                self._btn("Изменения", "info_edit", BTN_EMOJI_EDIT),
             ],
-            [InlineKeyboardButton("🔒 Приватность", callback_data="info_privacy")],
-            [InlineKeyboardButton("⚙️ Общие настройки", callback_data="settings_menu")],
-            [InlineKeyboardButton("🔌 Подключение бота", callback_data="info_connect")],
+            [self._btn("Приватность", "info_privacy", BTN_EMOJI_PRIVACY)],
+            [self._btn("Общие настройки", "settings_menu", BTN_EMOJI_SETTINGS)],
+            [self._btn("Подключение бота", "info_connect", BTN_EMOJI_CONNECT)],
         ]
         return InlineKeyboardMarkup(keyboard)
 
