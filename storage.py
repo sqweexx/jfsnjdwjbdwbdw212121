@@ -10,6 +10,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from referrals import ReferralStore
 from settings import DEFAULT_SETTINGS, UserSettingsStore
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "messages",
     "connections",
     "user_settings",
+    "referrals",
     "storage",
     "store",
     "get",
@@ -121,14 +123,16 @@ class ConnectionStore:
 
 
 class BotStorage:
-    """Фасад: сообщения + подключения + настройки пользователей."""
+    """Фасад: сообщения + подключения + настройки + рефералы."""
 
     def __init__(
         self,
         messages: MessageStore | None = None,
         connections: ConnectionStore | None = None,
         settings: UserSettingsStore | None = None,
+        referrals: ReferralStore | None = None,
         settings_path: Path | str | None = None,
+        referrals_path: Path | str | None = None,
     ) -> None:
         self.messages = messages or MessageStore()
         self.connections = connections or ConnectionStore()
@@ -137,16 +141,23 @@ class BotStorage:
         else:
             path = Path(settings_path) if settings_path else Path("data") / "settings.json"
             self.settings = UserSettingsStore(path)
+        if referrals is not None:
+            self.referrals = referrals
+        else:
+            rpath = Path(referrals_path) if referrals_path else Path("data") / "referrals.db"
+            self.referrals = ReferralStore(rpath)
 
 
 # Синглтоны приложения
 messages = MessageStore()
 connections = ConnectionStore()
 user_settings = UserSettingsStore()
+referrals = ReferralStore()
 storage = BotStorage(
     messages=messages,
     connections=connections,
     settings=user_settings,
+    referrals=referrals,
 )
 
 

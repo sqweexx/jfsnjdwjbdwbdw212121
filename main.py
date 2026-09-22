@@ -61,7 +61,10 @@ def build_app(
     app_config: Config | None = None,
 ) -> tuple[Application, BotHandlers]:
     cfg = app_config or config
-    bot_storage = BotStorage(settings_path=DATA_DIR / "settings.json")
+    bot_storage = BotStorage(
+        settings_path=DATA_DIR / "settings.json",
+        referrals_path=DATA_DIR / "referrals.db",
+    )
     parser = MessageParser(timezone=cfg.timezone)
     bot_handlers = BotHandlers(bot_storage=bot_storage, parser=parser)
 

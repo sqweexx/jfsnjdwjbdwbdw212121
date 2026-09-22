@@ -17,6 +17,7 @@ from constants import (
     BTN_EMOJI_HOW,
     BTN_EMOJI_PRIVACY,
     BTN_EMOJI_CONNECT,
+    BTN_EMOJI_REFERRAL,
     BTN_EMOJI_SETTINGS,
     CONNECT_PHOTO_ID,
     EMOJI_BACK,
@@ -32,11 +33,28 @@ from constants import (
     STICKER_ID,
     VIEW_ONCE_MEDIA_TYPES,
 )
+from referrals import ReferralStore
 from settings import DEFAULT_SETTINGS, UserSettingsStore
 from storage import BotStorage, ConnectionStore, MessageStore
 from utils import MessageParser, message_parser
 
 logger = logging.getLogger(__name__)
+
+FEATURE_LABELS = {
+    "deleted": "Удалённые",
+    "edited": "Изменённые",
+    "view_once": "Одноразовые",
+    "text": "Текст",
+    "photo": "Фото",
+    "video": "Видео",
+    "voice": "Голосовые",
+    "video_note": "Кружки",
+    "document": "Документы",
+    "sticker": "Стикеры",
+    "audio": "Аудио",
+    "animation": "GIF",
+    "other": "Прочее",
+}
 
 
 class BotHandlers:
@@ -47,6 +65,7 @@ class BotHandlers:
         messages: MessageStore | None = None,
         connections: ConnectionStore | None = None,
         settings: UserSettingsStore | None = None,
+        referrals: ReferralStore | None = None,
         bot_storage: BotStorage | None = None,
         parser: MessageParser | None = None,
     ) -> None:
@@ -54,17 +73,26 @@ class BotHandlers:
             self.messages = bot_storage.messages
             self.connections = bot_storage.connections
             self.settings = bot_storage.settings
+            self.referrals = bot_storage.referrals
             self.storage = bot_storage
         else:
             self.messages = messages or storage.messages
             self.connections = connections or storage.connections
             self.settings = settings or storage.user_settings
+            self.referrals = referrals or storage.referrals
             self.storage = BotStorage(
                 messages=self.messages,
                 connections=self.connections,
                 settings=self.settings,
+                referrals=self.referrals,
             )
         self.parser = parser or message_parser
+
+    def _feature_allowed(self, user_id: int, feature: str) -> bool:
+        """Настройка включена и разрешена уровнем доступа."""
+        return self.referrals.can_use(user_id, feature) and self.settings.is_enabled(
+            user_id, feature
+        )
 
     # ----- UI -----
 
@@ -85,6 +113,7 @@ class BotHandlers:
             ],
             [self._btn("Приватность", "info_privacy", BTN_EMOJI_PRIVACY)],
             [self._btn("Общие настройки", "settings_menu", BTN_EMOJI_SETTINGS)],
+            [self._btn("Рефералы и доступ", "referrals_menu", BTN_EMOJI_REFERRAL)],
             # Без premium-иконки — как просили не трогать
             [self._btn("Подключение бота", "info_connect", BTN_EMOJI_CONNECT)],
         ]
@@ -115,6 +144,8 @@ class BotHandlers:
         s = self.settings.get(user_id)
 
         def mark(key: str) -> str:
+            if not self.referrals.can_use(user_id, key):
+                return "🔒"
             return EMOJI_CHECK if s.get(key, True) else EMOJI_CROSS
 
         keyboard = [
@@ -142,7 +173,15 @@ class BotHandlers:
         ]
         return InlineKeyboardMarkup(keyboard)
 
-    def _settings_text(self) -> str:
+    def _settings_text(self, user_id: int | None = None) -> str:
+        level_hint = ""
+        if user_id is not None:
+            info = self.referrals.level_info(user_id)
+            level_hint = (
+                f"\n\n{EMOJI_STAR} <b>{info['title']}</b>\n"
+                f"Приглашено: <b>{info['count']}</b>\n"
+                "🔒 — недоступно на вашем уровне (пригласите друзей)."
+            )
         return (
             f"{EMOJI_GEAR} <b>Общие настройки</b>\n\n"
             "<b>Типы уведомлений:</b>\n"
@@ -153,6 +192,49 @@ class BotHandlers:
             "какие типы медиа присылать при удалении.\n\n"
             f"{EMOJI_CHECK} — включено {EMOJI_CROSS} — выключено\n"
             "Нажмите на пункт, чтобы переключить."
+            f"{level_hint}"
+        )
+
+    def _referrals_text(self, user_id: int) -> str:
+        self.referrals.ensure_user(user_id)
+        info = self.referrals.level_info(user_id)
+        link = self.referrals.referral_link(user_id, BOT_USERNAME)
+        next_hint = ""
+        if info["level"] == 1:
+            next_hint = "Пригласите <b>1</b> человека → уровень 2 (почти всё, кроме одноразовых)."
+        elif info["level"] == 2:
+            need = max(0, 3 - info["count"])
+            next_hint = (
+                f"Пригласите ещё <b>{need}</b> "
+                f"{'человека' if need == 1 else 'человек'} → уровень 3 (полный доступ)."
+            )
+        else:
+            next_hint = "У вас полный доступ ко всем функциям."
+
+        return (
+            f"{EMOJI_STAR} <b>Рефералы и уровень доступа</b>\n\n"
+            f"<b>{info['title']}</b>\n"
+            f"Приглашено друзей: <b>{info['count']}</b>\n\n"
+            "<b>Уровни:</b>\n"
+            "• <b>1</b> (0) — только удалённые текст и фото\n"
+            "• <b>2</b> (1–2) — всё, кроме одноразовых медиа\n"
+            "• <b>3</b> (3+) — полный доступ\n\n"
+            f"{next_hint}\n\n"
+            f"Ваша ссылка:\n<code>{link}</code>"
+        )
+
+    def _referrals_keyboard(self, user_id: int) -> InlineKeyboardMarkup:
+        link = self.referrals.referral_link(user_id, BOT_USERNAME)
+        return InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "📋 Скопировать ссылку",
+                        copy_text=CopyTextButton(text=link),
+                    )
+                ],
+                [InlineKeyboardButton(f"{EMOJI_BACK} Вернуться назад", callback_data="back_menu")],
+            ]
         )
 
     async def send_start_message(self, bot, chat_id: int) -> None:
@@ -195,6 +277,40 @@ class BotHandlers:
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.effective_chat:
             return
+
+        user = update.effective_user
+        user_id = user.id if user else None
+        if user_id:
+            self.referrals.ensure_user(user_id)
+            args = context.args or []
+            if args:
+                payload = args[0]
+                if payload.startswith("ref_"):
+                    try:
+                        referrer_id = int(payload[4:])
+                    except ValueError:
+                        referrer_id = None
+                    if referrer_id and referrer_id != user_id:
+                        registered = self.referrals.register_referral(user_id, referrer_id)
+                        if registered:
+                            try:
+                                info = self.referrals.level_info(referrer_id)
+                                await context.bot.send_message(
+                                    chat_id=referrer_id,
+                                    text=(
+                                        f"{EMOJI_STAR} <b>Новый реферал!</b>\n"
+                                        f"Приглашено: <b>{info['count']}</b>\n"
+                                        f"{info['title']}"
+                                    ),
+                                    parse_mode=ParseMode.HTML,
+                                )
+                            except Exception as e:
+                                logger.error(
+                                    "Не удалось уведомить реферера %s: %s",
+                                    referrer_id,
+                                    type(e).__name__,
+                                )
+
         await self.send_start_message(context.bot, update.effective_chat.id)
 
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -202,34 +318,53 @@ class BotHandlers:
         if not query:
             return
 
-        await query.answer()
-
         data = query.data
         user_id = query.from_user.id if query.from_user else OWNER_ID
 
         if data and data.startswith("set_"):
             key = data[4:]
+            if key not in DEFAULT_SETTINGS:
+                await query.answer()
+                return
+            if not self.referrals.can_use(user_id, key):
+                label = FEATURE_LABELS.get(key, key)
+                await query.answer(
+                    f"🔒 «{label}» недоступно на вашем уровне. Пригласите друзей.",
+                    show_alert=True,
+                )
+                return
+            await query.answer()
             current = self.settings.is_enabled(user_id, key)
             self.settings.set(user_id, key, not current)
             try:
                 await query.message.edit_text(
-                    text=self._settings_text(),
+                    text=self._settings_text(user_id),
                     parse_mode=ParseMode.HTML,
                     reply_markup=self._settings_keyboard(user_id),
                 )
             except Exception:
                 await query.message.reply_text(
-                    text=self._settings_text(),
+                    text=self._settings_text(user_id),
                     parse_mode=ParseMode.HTML,
                     reply_markup=self._settings_keyboard(user_id),
                 )
             return
 
+        await query.answer()
+
         if data == "settings_menu":
             await query.message.reply_text(
-                text=self._settings_text(),
+                text=self._settings_text(user_id),
                 parse_mode=ParseMode.HTML,
                 reply_markup=self._settings_keyboard(user_id),
+            )
+            return
+
+        if data == "referrals_menu":
+            await query.message.reply_text(
+                text=self._referrals_text(user_id),
+                parse_mode=ParseMode.HTML,
+                reply_markup=self._referrals_keyboard(user_id),
             )
             return
 
@@ -380,7 +515,7 @@ class BotHandlers:
             return
         if message.from_user.id != notify_user:
             return
-        if not self.settings.is_enabled(notify_user, "view_once"):
+        if not self._feature_allowed(notify_user, "view_once"):
             return
 
         replied = message.reply_to_message
@@ -559,7 +694,7 @@ class BotHandlers:
 
         if not notify_user:
             return
-        if not self.settings.is_enabled(notify_user, "edited"):
+        if not self._feature_allowed(notify_user, "edited"):
             return
 
         sender_id = new_data.get("sender_id") or (
@@ -618,12 +753,12 @@ class BotHandlers:
             sender_id = data.get("sender_id")
             if sender_id is not None and sender_id == notify_user:
                 continue
-            if not self.settings.is_enabled(notify_user, "deleted"):
+            if not self._feature_allowed(notify_user, "deleted"):
                 continue
 
             ctype = data.get("content_type") or "other"
             setting_key = ctype if ctype in DEFAULT_SETTINGS else "other"
-            if not self.settings.is_enabled(notify_user, setting_key):
+            if not self._feature_allowed(notify_user, setting_key):
                 continue
 
             data["notify_user_id"] = notify_user
