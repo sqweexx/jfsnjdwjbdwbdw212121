@@ -1,5 +1,7 @@
 ﻿.env
+.env.staging
 data/
+data-staging/
 venv/
 __pycache__/
 *.pyc

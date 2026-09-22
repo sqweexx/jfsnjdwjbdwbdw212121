@@ -1,0 +1,11 @@
+# Тестовый бот (staging) — отдельный контейнер, .env и data.
+# Запуск: docker compose -f docker-compose.staging.yml up -d --build
+services:
+  bot:
+    build: .
+    container_name: tg-business-bot-staging
+    restart: unless-stopped
+    env_file:
+      - .env.staging
+    volumes:
+      - ./data-staging:/app/data
