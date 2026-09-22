@@ -199,27 +199,35 @@ class BotHandlers:
         self.referrals.ensure_user(user_id)
         info = self.referrals.level_info(user_id)
         link = self.referrals.referral_link(user_id, BOT_USERNAME)
-        next_hint = ""
         if info["level"] == 1:
-            next_hint = "Пригласите <b>1</b> человека → уровень 2 (почти всё, кроме одноразовых)."
+            next_hint = (
+                "Чтобы открыть уровень 2, пригласите <b>1 нового</b> пользователя "
+                "(он должен впервые запустить бота по вашей ссылке)."
+            )
         elif info["level"] == 2:
             need = max(0, 3 - info["count"])
+            word = "человека" if need == 1 else "человек"
             next_hint = (
-                f"Пригласите ещё <b>{need}</b> "
-                f"{'человека' if need == 1 else 'человек'} → уровень 3 (полный доступ)."
+                f"До полного доступа осталось пригласить ещё <b>{need}</b> {word}."
             )
         else:
-            next_hint = "У вас полный доступ ко всем функциям."
+            next_hint = "Поздравляем — у вас открыты все функции бота."
 
         return (
             f"{EMOJI_STAR} <b>Рефералы и уровень доступа</b>\n\n"
-            f"<b>{info['title']}</b>\n"
-            f"Приглашено друзей: <b>{info['count']}</b>\n\n"
-            "<b>Уровни:</b>\n"
-            "• <b>1</b> (0) — только удалённые текст и фото\n"
-            "• <b>2</b> (1–2) — всё, кроме одноразовых медиа\n"
-            "• <b>3</b> (3+) — полный доступ\n\n"
+            f"<b>Сейчас:</b> {info['title']}\n"
+            f"<b>Приглашено:</b> {info['count']}\n\n"
             f"{next_hint}\n\n"
+            "<b>Как устроены уровни</b>\n\n"
+            "<b>Уровень 1</b> — 0 приглашённых\n"
+            "Доступны только копии <b>удалённых</b> текстовых сообщений и фото.\n"
+            "Правки, видео, голосовые, документы, стикеры и одноразовые медиа — нет.\n\n"
+            "<b>Уровень 2</b> — 1–2 приглашённых\n"
+            "Открывается почти всё: удаления любых типов, уведомления о правках, медиа.\n"
+            "Ещё закрыто: сохранение <b>одноразовых</b> фото/видео (1 просмотр).\n\n"
+            "<b>Уровень 3</b> — 3 и больше приглашённых\n"
+            "Полный доступ без ограничений, включая одноразовые медиа.\n\n"
+            "<i>Засчитываются только новые пользователи, которые раньше не писали /start.</i>\n\n"
             f"Ваша ссылка:\n<code>{link}</code>"
         )
 
@@ -281,8 +289,9 @@ class BotHandlers:
         user = update.effective_user
         user_id = user.id if user else None
         if user_id:
-            self.referrals.ensure_user(user_id)
             args = context.args or []
+            registered = False
+            # Сначала пробуем реферал: только если пользователь ещё ни разу не был в боте
             if args:
                 payload = args[0]
                 if payload.startswith("ref_"):
@@ -310,6 +319,9 @@ class BotHandlers:
                                     referrer_id,
                                     type(e).__name__,
                                 )
+            # Обычный /start или повторный заход — просто фиксируем пользователя
+            if not registered:
+                self.referrals.ensure_user(user_id)
 
         await self.send_start_message(context.bot, update.effective_chat.id)
 

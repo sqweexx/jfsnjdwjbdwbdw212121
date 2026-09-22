@@ -52,9 +52,9 @@ LEVEL_FEATURES: dict[int, frozenset[str]] = {
 }
 
 LEVEL_TITLES = {
-    1: "Уровень 1 — базовый",
-    2: "Уровень 2 — расширенный",
-    3: "Уровень 3 — полный доступ",
+    1: "Уровень 1 — базовый (0 приглашённых)",
+    2: "Уровень 2 — расширенный (1–2 приглашённых)",
+    3: "Уровень 3 — полный доступ (3+ приглашённых)",
 }
 
 
@@ -121,10 +121,24 @@ class ReferralStore:
             finally:
                 conn.close()
 
+    def user_exists(self, user_id: int) -> bool:
+        """True, если пользователь уже когда-либо запускал бота (/start)."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT 1 FROM users WHERE user_id = ?",
+                    (user_id,),
+                ).fetchone()
+                return row is not None
+            finally:
+                conn.close()
+
     def register_referral(self, referred_id: int, referrer_id: int) -> bool:
         """
-        Засчитать переход по реферальной ссылке.
-        Возвращает True, если реферал записан впервые.
+        Засчитать переход по реферальной ссылке только для нового пользователя.
+        Если человек уже писал /start раньше — приглашение не засчитывается.
+        Возвращает True, если реферал записан.
         """
         if referred_id == referrer_id:
             return False
@@ -133,38 +147,37 @@ class ReferralStore:
             conn = self._connect()
             try:
                 now = time.time()
+                # Уже знакомый пользователь — реферал не считаем
+                existing = conn.execute(
+                    "SELECT 1 FROM users WHERE user_id = ?",
+                    (referred_id,),
+                ).fetchone()
+                if existing:
+                    return False
+
                 conn.execute(
                     "INSERT OR IGNORE INTO users (user_id, referrer_id, created_at) "
                     "VALUES (?, NULL, ?)",
                     (referrer_id, now),
                 )
                 conn.execute(
-                    "INSERT OR IGNORE INTO users (user_id, referrer_id, created_at) "
+                    "INSERT INTO users (user_id, referrer_id, created_at) "
                     "VALUES (?, ?, ?)",
                     (referred_id, referrer_id, now),
                 )
-                # Если пользователь уже был — referrer не перезаписываем
-                row = conn.execute(
-                    "SELECT referrer_id FROM users WHERE user_id = ?",
-                    (referred_id,),
-                ).fetchone()
-                if row and row["referrer_id"] is None and referrer_id != referred_id:
-                    conn.execute(
-                        "UPDATE users SET referrer_id = ? WHERE user_id = ? AND referrer_id IS NULL",
-                        (referrer_id, referred_id),
-                    )
-
+                conn.execute(
+                    "INSERT INTO referrals (referrer_id, referred_id, created_at) "
+                    "VALUES (?, ?, ?)",
+                    (referrer_id, referred_id, now),
+                )
+                conn.commit()
+                return True
+            except sqlite3.IntegrityError:
                 try:
-                    conn.execute(
-                        "INSERT INTO referrals (referrer_id, referred_id, created_at) "
-                        "VALUES (?, ?, ?)",
-                        (referrer_id, referred_id, now),
-                    )
-                    conn.commit()
-                    return True
-                except sqlite3.IntegrityError:
                     conn.rollback()
-                    return False
+                except Exception:
+                    pass
+                return False
             except Exception as e:
                 logger.error("register_referral failed: %s", type(e).__name__)
                 try:
