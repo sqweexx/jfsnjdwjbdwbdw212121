@@ -30,6 +30,7 @@ EMOJI_TRASH = '<tg-emoji emoji-id="5445267414562389170">🗑</tg-emoji>'
 EMOJI_CAMERA = '<tg-emoji emoji-id="5429365504307383204">📷</tg-emoji>'
 EMOJI_LOCK = '<tg-emoji emoji-id="5296369303661067030">🔒</tg-emoji>'
 EMOJI_STAR = '<tg-emoji emoji-id="5348570868752595928">⭐</tg-emoji>'
+EMOJI_REFERRAL = '<tg-emoji emoji-id="5427168083074628963">🔗</tg-emoji>'
 EMOJI_GEAR = '<tg-emoji emoji-id="5341715473882955310">⚙️</tg-emoji>'
 EMOJI_INFO = '<tg-emoji emoji-id="5334544901428229844">ℹ️</tg-emoji>'
 EMOJI_BACK = "↩️"
