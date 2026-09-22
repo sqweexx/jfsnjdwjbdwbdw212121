@@ -1,7 +1,5 @@
 """UI-константы бота (общий стиль)."""
 
-from config import BOT_USERNAME as _BOT_USERNAME_FROM_ENV
-
 # Медиа, которое можно сохранить по ответу (одноразовые фото/видео/кружки и т.п.)
 VIEW_ONCE_MEDIA_TYPES = frozenset({
     "photo",
@@ -16,8 +14,7 @@ VIEW_ONCE_MEDIA_TYPES = frozenset({
 # Стикер приветствия
 STICKER_ID = "CAACAgIAAxkBAAER5nNqp6RsqLUnkBXIXNm3_WuXCkRkzwACLgADJHFiGojoNkNqQEMUPQQ"
 
-# Юзернейм бота (можно переопределить в .env как BOT_USERNAME)
-BOT_USERNAME = _BOT_USERNAME_FROM_ENV
+BOT_USERNAME = "@delete_message_monitor_bot"
 
 # Фото для раздела «Подключение» (file_id картинки с инструкцией)
 CONNECT_PHOTO_ID = "AgACAgIAAxkBAAIBHmqqho0TJpCxQaqqREhn9eiYbH61AAJwHmsbYMJQSSfCRgRs6gm7AQADAgADeQADPQQ"

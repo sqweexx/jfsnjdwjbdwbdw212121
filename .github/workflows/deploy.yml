@@ -17,4 +17,4 @@ jobs:
           script: |
             cd /opt/deletemessagesbot
             git pull
-            docker compose -f docker-compose.yml up -d --build
+            docker compose up -d --build

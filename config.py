@@ -14,7 +14,6 @@ class Config:
         self.bot_token = os.getenv("BOT_TOKEN")
         self.owner_id = int(os.getenv("OWNER_ID", "0"))
         self.timezone = os.getenv("TIMEZONE", "Europe/Prague")
-        self.bot_username = os.getenv("BOT_USERNAME", "@delete_message_monitor_bot")
         # Сообщения в RAM: хранить 3 часа, чистить раз в 2 минуты
         self.message_ttl_seconds = int(os.getenv("MESSAGE_TTL_SECONDS", str(3 * 3600)))
         self.cleanup_interval_seconds = int(os.getenv("CLEANUP_INTERVAL_SECONDS", "120"))
@@ -37,6 +36,5 @@ config = Config()
 BOT_TOKEN = config.bot_token
 OWNER_ID = config.owner_id
 TIMEZONE = config.timezone
-BOT_USERNAME = config.bot_username
 MESSAGE_TTL_SECONDS = config.message_ttl_seconds
 CLEANUP_INTERVAL_SECONDS = config.cleanup_interval_seconds
