@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from threading import Lock
@@ -12,6 +13,8 @@ from typing import Any
 
 from referrals import ReferralStore
 from settings import DEFAULT_SETTINGS, UserSettingsStore
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_SETTINGS",
@@ -146,6 +149,11 @@ class BotStorage:
         else:
             rpath = Path(referrals_path) if referrals_path else Path("data") / "referrals.db"
             self.referrals = ReferralStore(rpath)
+        # Пользователи с уже сохранёнными настройками считаются известными боту
+        try:
+            self.referrals.import_user_ids(self.settings.known_user_ids())
+        except Exception as e:
+            logger.error("Не удалось импортировать известных пользователей: %s", type(e).__name__)
 
 
 # Синглтоны приложения

@@ -291,8 +291,7 @@ class BotHandlers:
         user_id = user.id if user else None
         if user_id:
             args = context.args or []
-            registered = False
-            # Сначала пробуем реферал: только если пользователь ещё ни разу не был в боте
+            referrer_id = None
             if args:
                 payload = args[0]
                 if payload.startswith("ref_"):
@@ -300,28 +299,42 @@ class BotHandlers:
                         referrer_id = int(payload[4:])
                     except ValueError:
                         referrer_id = None
-                    if referrer_id and referrer_id != user_id:
-                        registered = self.referrals.register_referral(user_id, referrer_id)
-                        if registered:
-                            try:
-                                info = self.referrals.level_info(referrer_id)
-                                await context.bot.send_message(
-                                    chat_id=referrer_id,
-                                    text=(
-                                        f"{EMOJI_STAR} <b>Новый реферал!</b>\n"
-                                        f"Приглашено: <b>{info['count']}</b>\n"
-                                        f"{info['title']}"
-                                    ),
-                                    parse_mode=ParseMode.HTML,
-                                )
-                            except Exception as e:
-                                logger.error(
-                                    "Не удалось уведомить реферера %s: %s",
-                                    referrer_id,
-                                    type(e).__name__,
-                                )
-            # Обычный /start или повторный заход — просто фиксируем пользователя
-            if not registered:
+
+            # Уже знакомый боту пользователь по ссылке — реферал НЕ считаем
+            already_known = self.referrals.user_exists(user_id) or self.settings.has(
+                user_id
+            )
+            registered = False
+            if referrer_id and referrer_id != user_id and not already_known:
+                registered = self.referrals.register_referral(user_id, referrer_id)
+                if registered:
+                    try:
+                        info = self.referrals.level_info(referrer_id)
+                        await context.bot.send_message(
+                            chat_id=referrer_id,
+                            text=(
+                                f"{EMOJI_STAR} <b>Новый реферал!</b>\n"
+                                f"Приглашено: <b>{info['count']}</b>\n"
+                                f"{info['title']}"
+                            ),
+                            parse_mode=ParseMode.HTML,
+                        )
+                    except Exception as e:
+                        logger.error(
+                            "Не удалось уведомить реферера %s: %s",
+                            referrer_id,
+                            type(e).__name__,
+                        )
+            else:
+                if referrer_id and already_known:
+                    logger.error(
+                        "Referral ignored: user_id=%s already known",
+                        user_id,
+                    )
+                self.referrals.ensure_user(user_id)
+
+            # На всякий случай фиксируем после успешного реферала тоже
+            if registered:
                 self.referrals.ensure_user(user_id)
 
         await self.send_start_message(context.bot, update.effective_chat.id)
@@ -333,6 +346,8 @@ class BotHandlers:
 
         data = query.data
         user_id = query.from_user.id if query.from_user else OWNER_ID
+        # Любое нажатие кнопки = пользователь уже знаком с ботом
+        self.referrals.ensure_user(user_id)
 
         if data and data.startswith("set_"):
             key = data[4:]
@@ -798,6 +813,7 @@ class BotHandlers:
         user_id = conn.user.id if conn.user else None
         if conn.is_enabled and user_id:
             self.connections.save(conn.id, user_id)
+            self.referrals.ensure_user(user_id)
             try:
                 await context.bot.send_message(
                     chat_id=user_id,

@@ -1,6 +1,7 @@
 """Рефералы и уровни доступа (SQLite)."""
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import time
@@ -70,13 +71,15 @@ def features_for_level(level: int) -> frozenset[str]:
 
 
 class ReferralStore:
-    """Хранение пользователей и рефералов в SQLite."""
+    """Хранение пользователей и рефералов в SQLite (+ JSON-бэкап известных user_id)."""
 
     def __init__(self, path: Path | str = Path("data") / "referrals.db") -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.known_path = self.path.parent / "known_users.json"
         self._lock = Lock()
         self._init_db()
+        self._restore_known_users()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, check_same_thread=False)
@@ -108,6 +111,96 @@ class ReferralStore:
             finally:
                 conn.close()
 
+    def _read_known_file(self) -> set[int]:
+        if not self.known_path.exists():
+            return set()
+        try:
+            with self.known_path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if not isinstance(payload, list):
+                return set()
+            result: set[int] = set()
+            for item in payload:
+                try:
+                    result.add(int(item))
+                except (TypeError, ValueError):
+                    continue
+            return result
+        except (OSError, json.JSONDecodeError) as e:
+            logger.error("Не удалось прочитать known_users: %s", type(e).__name__)
+            return set()
+
+    def _write_known_file(self, ids: set[int]) -> None:
+        tmp_path = self.known_path.with_suffix(".tmp")
+        try:
+            with tmp_path.open("w", encoding="utf-8") as f:
+                json.dump(sorted(ids), f, ensure_ascii=False)
+            tmp_path.replace(self.known_path)
+        except OSError as e:
+            logger.error("Не удалось сохранить known_users: %s", type(e).__name__)
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _remember_user(self, user_id: int) -> None:
+        """Добавить user_id в JSON-бэкап (вызывать под self._lock)."""
+        known = self._read_known_file()
+        if user_id in known:
+            return
+        known.add(user_id)
+        self._write_known_file(known)
+
+    def _restore_known_users(self) -> None:
+        """Восстановить users из JSON, если SQLite был очищен/пересоздан."""
+        known = self._read_known_file()
+        if not known:
+            # Первичная синхронизация: выгрузить уже известных из SQLite в JSON
+            with self._lock:
+                conn = self._connect()
+                try:
+                    rows = conn.execute("SELECT user_id FROM users").fetchall()
+                    ids = {int(r["user_id"]) for r in rows}
+                finally:
+                    conn.close()
+                if ids:
+                    self._write_known_file(ids)
+            return
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                now = time.time()
+                conn.executemany(
+                    "INSERT OR IGNORE INTO users (user_id, referrer_id, created_at) "
+                    "VALUES (?, NULL, ?)",
+                    [(uid, now) for uid in known],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def import_user_ids(self, user_ids: list[int] | set[int]) -> None:
+        """Пометить пользователей как уже известных (например из settings.json)."""
+        ids = {int(uid) for uid in user_ids}
+        if not ids:
+            return
+        with self._lock:
+            conn = self._connect()
+            try:
+                now = time.time()
+                conn.executemany(
+                    "INSERT OR IGNORE INTO users (user_id, referrer_id, created_at) "
+                    "VALUES (?, NULL, ?)",
+                    [(uid, now) for uid in ids],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            known = self._read_known_file()
+            known |= ids
+            self._write_known_file(known)
+
     def ensure_user(self, user_id: int) -> None:
         with self._lock:
             conn = self._connect()
@@ -120,10 +213,13 @@ class ReferralStore:
                 conn.commit()
             finally:
                 conn.close()
+            self._remember_user(user_id)
 
     def user_exists(self, user_id: int) -> bool:
         """True, если пользователь уже когда-либо запускал бота (/start)."""
         with self._lock:
+            if user_id in self._read_known_file():
+                return True
             conn = self._connect()
             try:
                 row = conn.execute(
@@ -147,7 +243,9 @@ class ReferralStore:
             conn = self._connect()
             try:
                 now = time.time()
-                # Уже знакомый пользователь — реферал не считаем
+                # Уже знакомый пользователь (SQLite или JSON-бэкап) — не считаем
+                if referred_id in self._read_known_file():
+                    return False
                 existing = conn.execute(
                     "SELECT 1 FROM users WHERE user_id = ?",
                     (referred_id,),
@@ -171,6 +269,11 @@ class ReferralStore:
                     (referrer_id, referred_id, now),
                 )
                 conn.commit()
+                # Оба пользователя теперь известны боту
+                known = self._read_known_file()
+                known.add(referred_id)
+                known.add(referrer_id)
+                self._write_known_file(known)
                 return True
             except sqlite3.IntegrityError:
                 try:

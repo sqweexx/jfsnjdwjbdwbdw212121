@@ -87,6 +87,17 @@ class UserSettingsStore:
             except OSError:
                 pass
 
+    def has(self, user_id: int) -> bool:
+        """True, если для пользователя уже есть сохранённые настройки."""
+        with self._lock:
+            self._load_unlocked()
+            return user_id in self._settings
+
+    def known_user_ids(self) -> list[int]:
+        with self._lock:
+            self._load_unlocked()
+            return list(self._settings.keys())
+
     def get(self, user_id: int) -> dict[str, bool]:
         with self._lock:
             self._load_unlocked()
